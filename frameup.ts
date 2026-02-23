@@ -210,6 +210,44 @@ const clip = clipArg
   ? (() => { const [x, y, w, h] = clipArg.split(',').map(Number); return { left: x, top: y, width: w, height: h } })()
   : null
 
+async function dismissCookies(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    // Click the most common accept buttons
+    const acceptText = /^(accept|accept all|accept cookies|agree|i agree|got it|ok|okay|allow|allow all|allow cookies|consent|continue|yes|confirm)$/i
+    const buttons = [...document.querySelectorAll('button, a, [role="button"]')]
+    for (const el of buttons) {
+      const text = (el.textContent ?? '').trim()
+      if (acceptText.test(text)) {
+        (el as HTMLElement).click()
+        break
+      }
+    }
+  })
+
+  // Small pause for the banner to animate out
+  await page.waitForTimeout(600)
+
+  // Hide anything that still looks like a cookie/consent overlay
+  await page.evaluate(() => {
+    const keywords = /cookie|consent|gdpr|privacy|banner|notice|overlay|popup|modal/i
+    const elements = [...document.querySelectorAll('*')]
+    for (const el of elements) {
+      const html = el as HTMLElement
+      if (!html.offsetParent && html.tagName !== 'BODY') continue
+      const id  = (html.id ?? '').toLowerCase()
+      const cls = (html.className ?? '').toLowerCase()
+      if (keywords.test(id) || keywords.test(cls)) {
+        const style = getComputedStyle(html)
+        const isOverlay = style.position === 'fixed' || style.position === 'sticky' || style.zIndex > '100'
+        if (isOverlay) html.style.setProperty('display', 'none', 'important')
+      }
+    }
+    // Also remove common scroll locks added by cookie banners
+    document.body.style.removeProperty('overflow')
+    document.documentElement.style.removeProperty('overflow')
+  })
+}
+
 const hasFfmpeg = (() => {
   try { execSync('ffmpeg -version', { stdio: 'ignore' }); return true }
   catch { return false }
@@ -249,6 +287,8 @@ for (const url of urls) {
           page.waitForSelector(delaySelector, { timeout: 15_000 })
         )
       }
+
+      await spin('Clearing cookie banners…', () => dismissCookies(page))
 
       await spin('Letting animations breathe…', () =>
         page.waitForTimeout(WAIT_MS)
@@ -308,6 +348,8 @@ for (const url of urls) {
           page.waitForSelector(delaySelector, { timeout: 15_000 })
         )
       }
+
+      await spin('Clearing cookie banners…', () => dismissCookies(page))
 
       await spin('Letting animations breathe…', () =>
         page.waitForTimeout(WAIT_MS)
