@@ -20,7 +20,7 @@ Options:
   --scroll=<ms>    Duration of the scroll in video mode           (default: 8000)
   --hold=<ms>      Pause at the bottom before the video ends      (default: 1500)
   --density=<n>    Pixel density for images, 1, 2, or 3           (default: 3)
-  --selector=<css> Capture a specific element only (images only)
+  --selector=<css> Capture a specific element only
   --help           Show this help message
 
 Examples:
@@ -29,7 +29,7 @@ Examples:
   bun run frameup.ts https://example.com video --scroll=12000
   bun run frameup.ts https://example.com images --wait=3000 --density=2
   bun run frameup.ts https://example.com images --selector=".hero"
-  bun run frameup.ts https://example.com images --selector="#about"
+  bun run frameup.ts https://example.com video --selector=".features"
   `)
   process.exit(0)
 }
@@ -97,20 +97,32 @@ for (const { width, height } of SIZES) {
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
     await page.waitForTimeout(WAIT_MS)
 
-    await page.evaluate(async (durationMs) => {
-      const totalHeight = document.body.scrollHeight - window.innerHeight
-      if (totalHeight <= 0) return
+    await page.evaluate(async ({ durationMs, sel }) => {
+      let startY = 0
+      let endY   = document.body.scrollHeight - window.innerHeight
+
+      if (sel) {
+        const el = document.querySelector(sel)
+        if (el) {
+          const rect = el.getBoundingClientRect()
+          startY = window.scrollY + rect.top
+          endY   = Math.max(startY, window.scrollY + rect.bottom - window.innerHeight)
+          window.scrollTo(0, startY)
+        }
+      }
+
+      if (endY <= startY) return
       const start = performance.now()
       await new Promise<void>(resolve => {
         function step() {
           const t = Math.min((performance.now() - start) / durationMs, 1)
           const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-          window.scrollTo(0, totalHeight * eased)
+          window.scrollTo(0, startY + (endY - startY) * eased)
           t < 1 ? requestAnimationFrame(step) : resolve()
         }
         requestAnimationFrame(step)
       })
-    }, SCROLL_DURATION_MS)
+    }, { durationMs: SCROLL_DURATION_MS, sel: selector ?? null })
 
     await page.waitForTimeout(HOLD_MS)
     await page.close()
@@ -123,7 +135,8 @@ for (const { width, height } of SIZES) {
       continue
     }
 
-    const baseName = `${hostname}_${ts}_${width}x${height}`
+    const suffix   = selector ? `_${selector.replace(/[^a-z0-9]/gi, '')}` : ''
+    const baseName = `${hostname}_${ts}_${width}x${height}${suffix}`
     const webmSrc  = join(videoDir, webm)
 
     if (hasFfmpeg) {
