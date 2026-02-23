@@ -104,6 +104,28 @@ Your files will appear in **~/Downloads** within about 30 seconds.
 
 ---
 
+## Options
+
+You can customise the output by adding flags to the command:
+
+```bash
+bun run frameup.ts https://yourwebsite.com images --wait=3000 --density=2
+bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--wait=<ms>` | `6000` | Time to wait before capturing — increase if animations are still running |
+| `--scroll=<ms>` | `8000` | How long the scroll takes in video mode — increase for a slower, more cinematic feel |
+| `--hold=<ms>` | `1500` | How long to pause at the bottom before the video ends |
+| `--density=<n>` | `3` | Pixel density for images — `1`, `2`, or `3` |
+
+1000 = 1 second.
+
+Run `bun run frameup.ts --help` to see all options in the terminal.
+
+---
+
 ## Output
 
 | Mode | Files | Format |
@@ -115,14 +137,3 @@ Files are named automatically: `sitename_date_size.png` / `.mp4`
 
 ---
 
-## Tweaking timing
-
-If animations haven't finished before the screenshot fires, or the scroll feels too fast, open `frameup.ts` in any text editor and adjust these numbers near the top:
-
-| Setting | Default | What it does |
-|---|---|---|
-| `WAIT_MS` | `6000` | Milliseconds to wait before capturing (6s). Increase if animations are still running. |
-| `SCROLL_DURATION_MS` | `8000` | How long the scroll takes in video mode (8s). Increase for slower, more cinematic scrolls. |
-| `HOLD_MS` | `1500` | How long to pause at the bottom before the video ends (1.5s). |
-
-1000 = 1 second.

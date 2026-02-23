@@ -4,12 +4,44 @@ import { tmpdir, homedir } from 'os'
 import { rename, readdir, mkdir } from 'fs/promises'
 import { execSync } from 'child_process'
 
-const url  = process.argv[2]
-const mode = process.argv[3] ?? 'images'
+const args = process.argv.slice(2)
 
-if (!url || !['images', 'video'].includes(mode)) {
-  console.error('Usage: bun run capture.ts <url> [images|video]')
+if (args.length === 0 || args.includes('--help')) {
+  console.log(`
+Usage:
+  bun run frameup.ts <url> [images|video] [options]
+
+Modes:
+  images   Capture screenshots (default)
+  video    Record a scroll-through video
+
+Options:
+  --wait=<ms>      Wait before capturing, lets animations finish  (default: 6000)
+  --scroll=<ms>    Duration of the scroll in video mode           (default: 8000)
+  --hold=<ms>      Pause at the bottom before the video ends      (default: 1500)
+  --density=<n>    Pixel density for images, 1, 2, or 3           (default: 3)
+  --help           Show this help message
+
+Examples:
+  bun run frameup.ts https://example.com
+  bun run frameup.ts https://example.com video
+  bun run frameup.ts https://example.com video --scroll=12000
+  bun run frameup.ts https://example.com images --wait=3000 --density=2
+  `)
+  process.exit(0)
+}
+
+const url  = args.find(a => !a.startsWith('--') && a !== 'images' && a !== 'video')
+const mode = args.find(a => a === 'images' || a === 'video') ?? 'images'
+
+if (!url) {
+  console.error('Error: a URL is required. Run with --help for usage.')
   process.exit(1)
+}
+
+function flag(name: string, fallback: number): number {
+  const arg = args.find(a => a.startsWith(`--${name}=`))
+  return arg ? Number(arg.split('=')[1]) : fallback
 }
 
 const SIZES = [
@@ -17,13 +49,10 @@ const SIZES = [
   { width: 393,  height: 852 },
 ]
 
-// images
-const DENSITY = 3
-
-// video
-const WAIT_MS            = 6_000
-const SCROLL_DURATION_MS = 8_000
-const HOLD_MS            = 1_500
+const DENSITY          = flag('density', 3)
+const WAIT_MS          = flag('wait',    6_000)
+const SCROLL_DURATION_MS = flag('scroll', 8_000)
+const HOLD_MS          = flag('hold',    1_500)
 
 const hasFfmpeg = (() => {
   try { execSync('ffmpeg -version', { stdio: 'ignore' }); return true }
@@ -46,7 +75,7 @@ for (const { width, height } of SIZES) {
     console.log(`✓ ${file}`)
     await page.close()
   } else {
-    const videoDir = join(tmpdir(), `capture-${Date.now()}`)
+    const videoDir = join(tmpdir(), `frameup-${Date.now()}`)
     await mkdir(videoDir, { recursive: true })
 
     const context = await browser.newContext({
