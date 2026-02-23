@@ -1,63 +1,88 @@
 # capture
 
-Captures websites as screenshots or scroll-through videos using Playwright.
-Outputs files to `~/Downloads`.
+**capture** is a command-line tool that opens any website in a real browser and saves it as high-resolution screenshots or a smooth scroll-through video — desktop and mobile sizes at once, straight to your Downloads folder.
 
-## Setup
+https://github.com/zjebinsky/capture
 
+---
+
+## What you get
+
+**Screenshots** — two high-res PNGs, one desktop and one mobile, captured after the page has fully loaded and animations have finished.
+
+**Videos** — two MP4s showing the full page scrolling from top to bottom, one desktop and one mobile.
+
+---
+
+## One-time setup
+
+You'll need three free tools installed. Open **Terminal** (press `Cmd + Space`, type Terminal, hit Enter) and run each block below.
+
+**1. Install Homebrew** (a package manager for macOS):
 ```bash
-bun install
-bunx playwright install chromium
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-For MP4 output (video mode), install ffmpeg:
+**2. Install Bun** (runs the script):
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
 
+**3. Install ffmpeg** (converts videos to MP4):
 ```bash
 brew install ffmpeg
 ```
 
-Without ffmpeg, videos are saved as `.webm` instead.
-
-## Usage
-
+**4. Download capture and set it up:**
 ```bash
-bun run capture.ts <url> [images|video]
+git clone https://github.com/zjebinsky/capture.git ~/Developer/capture
+cd ~/Developer/capture
+bun install
+bunx playwright install chromium
 ```
 
-`images` is the default if no mode is specified.
+That's it. You only ever do this once.
 
-### Examples
+---
+
+## Every day use
+
+Open Terminal, then run:
 
 ```bash
-bun run capture.ts https://example.com
-bun run capture.ts https://example.com images
-bun run capture.ts https://example.com video
+cd ~/Developer/capture
+bun run capture.ts https://yourwebsite.com images
 ```
+
+Or for a scroll video:
+
+```bash
+bun run capture.ts https://yourwebsite.com video
+```
+
+Your files will appear in **~/Downloads** within about 30 seconds.
+
+---
 
 ## Output
 
-### images
-
-Two PNGs at `@3x` pixel density:
-
-- `hostname_timestamp_1500x900.png` — desktop
-- `hostname_timestamp_393x852.png` — mobile
-
-### video
-
-Two MP4s (or WebM if ffmpeg is not installed) recording a smooth scroll from top to bottom:
-
-- `hostname_timestamp_1500x900.mp4` — desktop
-- `hostname_timestamp_393x852.mp4` — mobile
-
-## Configuration
-
-Constants at the top of `capture.ts`:
-
-| Constant | Default | Description |
+| Mode | Files | Format |
 |---|---|---|
-| `SIZES` | 1500×900, 393×852 | Viewport presets (desktop + mobile) |
-| `DENSITY` | `3` | Pixel density for images (`deviceScaleFactor`) |
-| `WAIT_MS` | `6000` | Wait before capturing — lets intro animations finish |
-| `SCROLL_DURATION_MS` | `8000` | How long the scroll takes in video mode |
-| `HOLD_MS` | `1500` | Pause at the bottom before closing in video mode |
+| `images` | Desktop (1500×900) + Mobile (393×852) | PNG, @3x resolution |
+| `video` | Desktop (1500×900) + Mobile (393×852) | MP4 |
+
+Files are named automatically: `sitename_date_size.png` / `.mp4`
+
+---
+
+## Tweaking timing
+
+If animations haven't finished before the screenshot fires, or the scroll feels too fast, open `capture.ts` in any text editor and adjust these numbers near the top:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `WAIT_MS` | `6000` | Milliseconds to wait before capturing (6s). Increase if animations are still running. |
+| `SCROLL_DURATION_MS` | `8000` | How long the scroll takes in video mode (8s). Increase for slower, more cinematic scrolls. |
+| `HOLD_MS` | `1500` | How long to pause at the bottom before the video ends (1.5s). |
+
+1000 = 1 second.
