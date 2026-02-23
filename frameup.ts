@@ -1,9 +1,10 @@
 import { chromium } from 'playwright'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { tmpdir, homedir } from 'os'
 import { rename, readdir, mkdir } from 'fs/promises'
 import { exec, execSync } from 'child_process'
 import { promisify } from 'util'
+import sharp from 'sharp'
 
 const execAsync = promisify(exec)
 
@@ -62,8 +63,9 @@ if (args.length === 0 || args.includes('--help')) {
     --scroll=<ms>    Duration of the scroll in video mode           (default: 8000)
     --hold=<ms>      Pause at the bottom before the video ends      (default: 1500)
     --density=<n>    Pixel density for images, 1, 2, or 3           (default: 3)
-    --selector=<css> Capture a specific element only
-    --help           Show this help message
+    --selector=<css>      Capture a specific element only
+    --watermark=<path>    Overlay a PNG onto the output, bottom right
+    --help                Show this help message
 
   ${c.dim}Examples:${c.reset}
     bun run frameup.ts https://example.com
@@ -71,7 +73,7 @@ if (args.length === 0 || args.includes('--help')) {
     bun run frameup.ts https://example.com video --scroll=12000
     bun run frameup.ts https://example.com images --wait=3000 --density=2
     bun run frameup.ts https://example.com images --selector=".hero"
-    bun run frameup.ts https://example.com video --selector=".features"
+    bun run frameup.ts https://example.com images --watermark=./logo.png
   `)
   process.exit(0)
 }
@@ -96,6 +98,8 @@ const SIZES = [
 
 const DENSITY            = flag('density', 3)
 const selector           = args.find(a => a.startsWith('--selector='))?.split('=').slice(1).join('=')
+const watermarkArg       = args.find(a => a.startsWith('--watermark='))?.split('=').slice(1).join('=')
+const watermarkPath      = watermarkArg ? resolve(watermarkArg) : null
 const WAIT_MS            = flag('wait',    6_000)
 const SCROLL_DURATION_MS = flag('scroll',  8_000)
 const HOLD_MS            = flag('hold',    1_500)
@@ -141,6 +145,22 @@ for (const url of urls) {
           await page.screenshot({ path: file })
         }
       })
+
+      if (watermarkPath) {
+        await spin('Stamping watermark…', async () => {
+          const { width: imgW, height: imgH } = await sharp(file).metadata()
+          const { width: wmW, height: wmH }   = await sharp(watermarkPath).metadata()
+          const margin = 20
+          await sharp(file)
+            .composite([{
+              input: watermarkPath,
+              left: (imgW ?? 0) - (wmW ?? 0) - margin,
+              top:  (imgH ?? 0) - (wmH ?? 0) - margin,
+            }])
+            .toFile(file + '.tmp.png')
+          await rename(file + '.tmp.png', file)
+        })
+      }
 
       log(file)
       saved.push(file)
@@ -210,9 +230,12 @@ for (const url of urls) {
 
       if (hasFfmpeg) {
         const mp4Out = join(outDir, `${baseName}.mp4`)
-        await spin('Developing the footage…', () =>
-          execAsync(`ffmpeg -y -i "${webmSrc}" -c:v libx264 -pix_fmt yuv420p "${mp4Out}"`)
-        )
+        await spin('Developing the footage…', () => {
+          const wmFlag = watermarkPath
+            ? `-i "${watermarkPath}" -filter_complex "overlay=W-w-20:H-h-20" `
+            : ''
+          return execAsync(`ffmpeg -y -i "${webmSrc}" ${wmFlag}-c:v libx264 -pix_fmt yuv420p "${mp4Out}"`)
+        })
         log(mp4Out)
         saved.push(mp4Out)
       } else {

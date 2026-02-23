@@ -8,9 +8,11 @@
     "frameup": "bun run frameup.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/sharp": "^0.32.0"
   },
   "dependencies": {
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "sharp": "^0.34.5"
   }
 }

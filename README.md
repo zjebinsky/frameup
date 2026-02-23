@@ -145,6 +145,7 @@ bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
 | `--hold=<ms>` | `1500` | How long to pause at the bottom before the video ends |
 | `--density=<n>` | `3` | Pixel density for images — `1`, `2`, or `3` |
 | `--selector=<css>` | — | Capture a specific section only, e.g. `--selector=".hero"` or `--selector="#about"` |
+| `--watermark=<path>` | — | Overlay a PNG onto the output in the bottom right corner, e.g. `--watermark=./logo.png` |
 
 1000 = 1 second.
 
