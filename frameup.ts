@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
 import { join, resolve } from 'path'
 import { tmpdir, homedir } from 'os'
-import { rename, readdir, mkdir } from 'fs/promises'
+import { rename, readdir, mkdir, readFile } from 'fs/promises'
 import { exec, execSync } from 'child_process'
 import { promisify } from 'util'
 import sharp from 'sharp'
@@ -52,33 +52,65 @@ if (args.length === 0 || args.includes('--help')) {
   ${c.bold}frameup ✦${c.reset}
 
   ${c.dim}Usage:${c.reset}
-    bun run frameup.ts <url> [url2 url3 ...] [images|video] [options]
+    bun run frameup.ts <url> [url2 ...] [images|video] [options]
 
   ${c.dim}Modes:${c.reset}
     images   Capture screenshots (default)
     video    Record a scroll-through video
 
   ${c.dim}Options:${c.reset}
-    --wait=<ms>      Wait before capturing, lets animations finish  (default: 6000)
-    --scroll=<ms>    Duration of the scroll in video mode           (default: 8000)
-    --hold=<ms>      Pause at the bottom before the video ends      (default: 1500)
-    --density=<n>    Pixel density for images, 1, 2, or 3           (default: 3)
-    --selector=<css>      Capture a specific element only
-    --watermark=<path>    Overlay a PNG onto the output, bottom right
-    --help                Show this help message
+    --wait=<ms>             Wait before capturing               (default: 6000)
+    --scroll=<ms>           Scroll duration in video mode       (default: 8000)
+    --hold=<ms>             Pause at bottom before video ends   (default: 1500)
+    --density=<n>           Pixel density: 1, 2, or 3           (default: 3)
+    --format=<fmt>          Output format: png or webp          (default: png)
+    --fps=<n>               Video frame rate                    (default: ffmpeg default)
+    --selector=<css>        Capture a specific element only
+    --delay-selector=<css>  Wait for element before capturing
+    --clip=<x,y,w,h>        Crop output to a region (pixels, pre-density)
+    --watermark=<path>      Overlay a PNG, bottom right
+    --prefix=<name>         Custom filename prefix
+    --out=<dir>             Output directory                    (default: ~/Downloads)
+    --urls=<path>           Text file with one URL per line
+    --dark                  Force dark mode
+    --no-scroll             Record without scrolling (video mode)
+    --zip                   Bundle all outputs into a zip file
+    --open                  Open output folder when done
+    --help                  Show this help message
 
   ${c.dim}Examples:${c.reset}
     bun run frameup.ts https://example.com
     bun run frameup.ts https://example.com https://other.com images
-    bun run frameup.ts https://example.com video --scroll=12000
-    bun run frameup.ts https://example.com images --wait=3000 --density=2
-    bun run frameup.ts https://example.com images --selector=".hero"
-    bun run frameup.ts https://example.com images --watermark=./logo.png
+    bun run frameup.ts https://example.com video --scroll=12000 --fps=60
+    bun run frameup.ts https://example.com images --format=webp --dark
+    bun run frameup.ts https://example.com images --clip=0,0,1500,800
+    bun run frameup.ts https://example.com images --watermark=./logo.png --zip
+    bun run frameup.ts --urls=./sites.txt images --prefix=portfolio --out=./out
   `)
   process.exit(0)
 }
 
-const urls = args.filter(a => !a.startsWith('--') && a !== 'images' && a !== 'video')
+function strFlag(name: string): string | undefined {
+  return args.find(a => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=')
+}
+
+function numFlag(name: string, fallback: number): number {
+  const arg = args.find(a => a.startsWith(`--${name}=`))
+  return arg ? Number(arg.split('=')[1]) : fallback
+}
+
+// ─── url sources ─────────────────────────────────────────────────────────────
+
+const urlsFilePath = strFlag('urls')
+const fileUrls: string[] = urlsFilePath
+  ? (await readFile(resolve(urlsFilePath), 'utf-8'))
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l && !l.startsWith('#'))
+  : []
+
+const inlineUrls = args.filter(a => !a.startsWith('--') && a !== 'images' && a !== 'video')
+const urls = [...inlineUrls, ...fileUrls]
 const mode = args.find(a => a === 'images' || a === 'video') ?? 'images'
 
 if (urls.length === 0) {
@@ -86,33 +118,46 @@ if (urls.length === 0) {
   process.exit(1)
 }
 
-function flag(name: string, fallback: number): number {
-  const arg = args.find(a => a.startsWith(`--${name}=`))
-  return arg ? Number(arg.split('=')[1]) : fallback
-}
+// ─── options ─────────────────────────────────────────────────────────────────
 
-const SIZES = [
-  { width: 1500, height: 900,  label: 'desktop' },
-  { width: 393,  height: 852,  label: 'mobile'  },
-]
-
-const DENSITY            = flag('density', 3)
-const selector           = args.find(a => a.startsWith('--selector='))?.split('=').slice(1).join('=')
-const watermarkArg       = args.find(a => a.startsWith('--watermark='))?.split('=').slice(1).join('=')
+const DENSITY            = numFlag('density', 3)
+const selector           = strFlag('selector')
+const delaySelector      = strFlag('delay-selector')
+const watermarkArg       = strFlag('watermark')
 const watermarkPath      = watermarkArg ? resolve(watermarkArg) : null
-const WAIT_MS            = flag('wait',    6_000)
-const SCROLL_DURATION_MS = flag('scroll',  8_000)
-const HOLD_MS            = flag('hold',    1_500)
+const prefix             = strFlag('prefix')
+const outArg             = strFlag('out')
+const format             = strFlag('format') ?? 'png'
+const clipArg            = strFlag('clip')
+const FPS                = numFlag('fps', 0)
+const WAIT_MS            = numFlag('wait',   6_000)
+const SCROLL_DURATION_MS = numFlag('scroll', 8_000)
+const HOLD_MS            = numFlag('hold',   1_500)
+const darkMode           = args.includes('--dark')
+const noScroll           = args.includes('--no-scroll')
+const doZip              = args.includes('--zip')
+const doOpen             = args.includes('--open')
+
+const outDir = outArg ? resolve(outArg) : join(homedir(), 'Downloads')
+await mkdir(outDir, { recursive: true })
+
+const suffix = selector ? `_${selector.replace(/[^a-z0-9]/gi, '')}` : ''
+
+const clip = clipArg
+  ? (() => { const [x, y, w, h] = clipArg.split(',').map(Number); return { left: x, top: y, width: w, height: h } })()
+  : null
 
 const hasFfmpeg = (() => {
   try { execSync('ffmpeg -version', { stdio: 'ignore' }); return true }
   catch { return false }
 })()
 
-// ─── go ──────────────────────────────────────────────────────────────────────
+const SIZES = [
+  { width: 1500, height: 900,  label: 'desktop' },
+  { width: 393,  height: 852,  label: 'mobile'  },
+]
 
-const outDir = join(homedir(), 'Downloads')
-const suffix = selector ? `_${selector.replace(/[^a-z0-9]/gi, '')}` : ''
+// ─── go ──────────────────────────────────────────────────────────────────────
 
 const browser = await chromium.launch()
 const saved: string[] = []
@@ -120,47 +165,60 @@ const saved: string[] = []
 for (const url of urls) {
   const hostname = new URL(url).hostname.replace(/\./g, '-')
   const ts       = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+  const stem     = prefix ?? hostname
 
-  console.log(`\n  ${c.bold}frameup ✦${c.reset}  ${c.dim}${hostname}  ·  ${mode}${c.reset}\n`)
+  console.log(`\n  ${c.bold}frameup ✦${c.reset}  ${c.dim}${hostname}  ·  ${mode}${darkMode ? '  · dark' : ''}${c.reset}\n`)
 
   for (const { width, height, label } of SIZES) {
     if (mode === 'images') {
-      const page = await browser.newPage({ deviceScaleFactor: DENSITY })
+      const page = await browser.newPage({
+        deviceScaleFactor: DENSITY,
+        colorScheme: darkMode ? 'dark' : 'light',
+      })
       await page.setViewportSize({ width, height })
 
       await spin(`Opening ${hostname}…`, () =>
         page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
       )
 
+      if (delaySelector) {
+        await spin(`Waiting for ${delaySelector}…`, () =>
+          page.waitForSelector(delaySelector, { timeout: 15_000 })
+        )
+      }
+
       await spin('Letting animations breathe…', () =>
         page.waitForTimeout(WAIT_MS)
       )
 
-      const file = join(outDir, `${hostname}_${ts}_${width}x${height}${suffix}.png`)
+      const ext  = format === 'webp' ? 'webp' : 'png'
+      const file = join(outDir, `${stem}_${ts}_${width}x${height}${suffix}.${ext}`)
 
       await spin(`Shooting ${label} (${width}×${height})…`, async () => {
-        if (selector) {
-          await page.locator(selector).first().screenshot({ path: file })
-        } else {
-          await page.screenshot({ path: file })
-        }
-      })
+        const raw = selector
+          ? await page.locator(selector).first().screenshot()
+          : await page.screenshot({ fullPage: !selector })
 
-      if (watermarkPath) {
-        await spin('Stamping watermark…', async () => {
-          const { width: imgW, height: imgH } = await sharp(file).metadata()
-          const { width: wmW, height: wmH }   = await sharp(watermarkPath).metadata()
-          const margin = 20
-          await sharp(file)
-            .composite([{
-              input: watermarkPath,
-              left: (imgW ?? 0) - (wmW ?? 0) - margin,
-              top:  (imgH ?? 0) - (wmH ?? 0) - margin,
-            }])
-            .toFile(file + '.tmp.png')
-          await rename(file + '.tmp.png', file)
+        let pipeline = sharp(raw)
+        if (clip) pipeline = pipeline.extract({
+          left:   clip.left   * DENSITY,
+          top:    clip.top    * DENSITY,
+          width:  clip.width  * DENSITY,
+          height: clip.height * DENSITY,
         })
-      }
+        if (watermarkPath) {
+          const { width: imgW, height: imgH } = await pipeline.clone().metadata()
+          const { width: wmW,  height: wmH  } = await sharp(watermarkPath).metadata()
+          const margin = 20
+          pipeline = pipeline.composite([{
+            input: watermarkPath,
+            left: (imgW ?? 0) - (wmW ?? 0) - margin,
+            top:  (imgH ?? 0) - (wmH ?? 0) - margin,
+          }])
+        }
+        if (format === 'webp') pipeline = pipeline.webp({ quality: 90 })
+        await pipeline.toFile(file)
+      })
 
       log(file)
       saved.push(file)
@@ -172,6 +230,7 @@ for (const url of urls) {
 
       const context = await browser.newContext({
         viewport: { width, height },
+        colorScheme: darkMode ? 'dark' : 'light',
         recordVideo: { dir: videoDir, size: { width, height } },
       })
 
@@ -181,37 +240,45 @@ for (const url of urls) {
         page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
       )
 
+      if (delaySelector) {
+        await spin(`Waiting for ${delaySelector}…`, () =>
+          page.waitForSelector(delaySelector, { timeout: 15_000 })
+        )
+      }
+
       await spin('Letting animations breathe…', () =>
         page.waitForTimeout(WAIT_MS)
       )
 
       await spin(`Rolling ${label} (${width}×${height})…`, async () => {
-        await page.evaluate(async ({ durationMs, sel }) => {
-          let startY = 0
-          let endY   = document.body.scrollHeight - window.innerHeight
+        if (!noScroll) {
+          await page.evaluate(async ({ durationMs, sel }) => {
+            let startY = 0
+            let endY   = document.body.scrollHeight - window.innerHeight
 
-          if (sel) {
-            const el = document.querySelector(sel)
-            if (el) {
-              const rect = el.getBoundingClientRect()
-              startY = window.scrollY + rect.top
-              endY   = Math.max(startY, window.scrollY + rect.bottom - window.innerHeight)
-              window.scrollTo(0, startY)
+            if (sel) {
+              const el = document.querySelector(sel)
+              if (el) {
+                const rect = el.getBoundingClientRect()
+                startY = window.scrollY + rect.top
+                endY   = Math.max(startY, window.scrollY + rect.bottom - window.innerHeight)
+                window.scrollTo(0, startY)
+              }
             }
-          }
 
-          if (endY <= startY) return
-          const start = performance.now()
-          await new Promise<void>(resolve => {
-            function step() {
-              const t = Math.min((performance.now() - start) / durationMs, 1)
-              const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-              window.scrollTo(0, startY + (endY - startY) * eased)
-              t < 1 ? requestAnimationFrame(step) : resolve()
-            }
-            requestAnimationFrame(step)
-          })
-        }, { durationMs: SCROLL_DURATION_MS, sel: selector ?? null })
+            if (endY <= startY) return
+            const start = performance.now()
+            await new Promise<void>(resolve => {
+              function step() {
+                const t = Math.min((performance.now() - start) / durationMs, 1)
+                const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
+                window.scrollTo(0, startY + (endY - startY) * eased)
+                t < 1 ? requestAnimationFrame(step) : resolve()
+              }
+              requestAnimationFrame(step)
+            })
+          }, { durationMs: SCROLL_DURATION_MS, sel: selector ?? null })
+        }
 
         await page.waitForTimeout(HOLD_MS)
         await page.close()
@@ -225,16 +292,15 @@ for (const url of urls) {
         continue
       }
 
-      const baseName = `${hostname}_${ts}_${width}x${height}${suffix}`
+      const baseName = `${stem}_${ts}_${width}x${height}${suffix}`
       const webmSrc  = join(videoDir, webm)
 
       if (hasFfmpeg) {
         const mp4Out = join(outDir, `${baseName}.mp4`)
         await spin('Developing the footage…', () => {
-          const wmFlag = watermarkPath
-            ? `-i "${watermarkPath}" -filter_complex "overlay=W-w-20:H-h-20" `
-            : ''
-          return execAsync(`ffmpeg -y -i "${webmSrc}" ${wmFlag}-c:v libx264 -pix_fmt yuv420p "${mp4Out}"`)
+          const wmFlag  = watermarkPath ? `-i "${watermarkPath}" -filter_complex "overlay=W-w-20:H-h-20" ` : ''
+          const fpsFlag = FPS > 0 ? `-r ${FPS} ` : ''
+          return execAsync(`ffmpeg -y -i "${webmSrc}" ${wmFlag}${fpsFlag}-c:v libx264 -pix_fmt yuv420p "${mp4Out}"`)
         })
         log(mp4Out)
         saved.push(mp4Out)
@@ -252,5 +318,28 @@ for (const url of urls) {
 
 await browser.close()
 
+// ─── zip ─────────────────────────────────────────────────────────────────────
+
+if (doZip && saved.length > 0) {
+  const zipName = `frameup_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.zip`
+  const zipPath = join(outDir, zipName)
+  await spin('Zipping outputs…', async () => {
+    const fileList = saved.map(f => `"${f}"`).join(' ')
+    if (process.platform === 'win32') {
+      await execAsync(`powershell -Command "Compress-Archive -Path ${saved.map(f => `'${f}'`).join(',')} -DestinationPath '${zipPath}'"`)
+    } else {
+      await execAsync(`zip -j "${zipPath}" ${fileList}`)
+    }
+  })
+  log(zipPath)
+}
+
+// ─── done ─────────────────────────────────────────────────────────────────────
+
 const noun = mode === 'images' ? (saved.length === 1 ? 'frame' : 'frames') : (saved.length === 1 ? 'clip' : 'clips')
-console.log(`  ${c.magenta}✦${c.reset}  ${c.bold}${saved.length} ${noun} saved${c.reset}  ${c.dim}→ ~/Downloads${c.reset}\n`)
+console.log(`  ${c.magenta}✦${c.reset}  ${c.bold}${saved.length} ${noun} saved${c.reset}  ${c.dim}→ ${outDir}${c.reset}\n`)
+
+if (doOpen) {
+  const openCmd = process.platform === 'win32' ? `explorer "${outDir}"` : `open "${outDir}"`
+  execSync(openCmd)
+}

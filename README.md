@@ -144,8 +144,19 @@ bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
 | `--scroll=<ms>` | `8000` | How long the scroll takes in video mode — increase for a slower, more cinematic feel |
 | `--hold=<ms>` | `1500` | How long to pause at the bottom before the video ends |
 | `--density=<n>` | `3` | Pixel density for images — `1`, `2`, or `3` |
-| `--selector=<css>` | — | Capture a specific section only, e.g. `--selector=".hero"` or `--selector="#about"` |
-| `--watermark=<path>` | — | Overlay a PNG onto the output in the bottom right corner, e.g. `--watermark=./logo.png` |
+| `--format=<fmt>` | `png` | Output format for images — `png` or `webp` |
+| `--fps=<n>` | — | Video frame rate, e.g. `--fps=60` |
+| `--selector=<css>` | — | Capture a specific section only, e.g. `--selector=".hero"` |
+| `--delay-selector=<css>` | — | Wait for an element to appear before capturing, e.g. `--delay-selector=".loaded"` |
+| `--clip=<x,y,w,h>` | — | Crop the output to a region in pixels, e.g. `--clip=0,0,1500,800` |
+| `--watermark=<path>` | — | Overlay a PNG onto the output, bottom right, e.g. `--watermark=./logo.png` |
+| `--prefix=<name>` | hostname | Custom filename prefix instead of the site hostname |
+| `--out=<dir>` | `~/Downloads` | Custom output directory |
+| `--urls=<path>` | — | Text file with one URL per line — processed in order |
+| `--dark` | — | Force dark mode before capturing |
+| `--no-scroll` | — | Record without scrolling in video mode |
+| `--zip` | — | Bundle all output files into a single zip |
+| `--open` | — | Open the output folder when done |
 
 1000 = 1 second.
 
