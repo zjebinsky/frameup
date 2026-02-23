@@ -4,27 +4,18 @@ Ideas and growth directions for frameup.
 
 ---
 
-## Native screen recording (v2 concept)
+## Native screen recording
 
-Instead of stitching screenshots into a video, launch a headed Chromium window at a known screen position and capture the region with ffmpeg's `avfoundation` input (macOS) in real time.
+Right now frameup builds videos frame by frame — it takes a screenshot, moves the scroll position, takes another screenshot, and stitches them together. It works well, but it's a simulation of a video rather than a real one.
 
-**What you'd gain:**
-- Genuine 60fps with real browser rendering — GPU compositing, subpixel antialiasing, the works
-- CSS animations, transitions, and parallax play at full fidelity
-- No screenshot latency or frame rate ceiling
-- Scroll momentum feels real because it is real
+The next step would be to flip that around: open the browser as a real window, hit record on the screen, and let the browser scroll itself.
 
-**Approach:**
-1. Launch Chromium headed (`headless: false`) with `--app` flag (removes address bar/tabs), positioned at a known coordinate
-2. Start `ffmpeg -f avfoundation` capturing that exact screen region at 60fps
-3. Trigger scroll via `page.mouse.wheel()` — browser compositor handles animation
-4. Stop ffmpeg when scroll reaches bottom, crop and encode
+**What we would gain:**
 
-**Hard parts:**
-- macOS Screen Recording permission — one-time user setup, can't be automated
-- Window positioning — OS can be unpredictable, needs a reliable offset
-- OS title bar crop — `--app` removes browser chrome but not the ~28px macOS title bar
-- Scroll control — handing animation to the browser means less precise speed/easing control
-- Start/stop sync — ffmpeg needs to be capturing before scroll begins
+Real 60fps. Not simulated — the browser's GPU compositor rendering every frame at full speed, the way the page was meant to be seen. Subpixel antialiasing, smooth gradients, nothing approximated.
 
-**Verdict:** Local macOS tool for designers — totally viable, quality jump would be massive. Server/CI use case — falls apart without a display. Essentially what Rotato and Screen Studio do internally.
+CSS animations that actually play. Scroll-triggered effects, parallax, hover transitions — right now these are frozen between frames. With native recording they run at full fidelity because we're capturing the live page, not snapshots of it.
+
+Scroll that feels human. Instead of programmatically jumping the scroll position frame by frame, we'd fire `page.mouse.wheel()` and let the browser handle momentum, deceleration, and snap points natively. The result would be indistinguishable from a real person scrolling.
+
+No ceiling. The current approach gets slower as pages get taller or more complex — more frames to capture, more screenshots to take. Native recording has no such limit. A 10,000px page records just as smoothly as a 1,000px one.
