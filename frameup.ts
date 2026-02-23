@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import { join, resolve } from 'path'
 import { tmpdir, homedir } from 'os'
 import { rename, readdir, mkdir, readFile, rm } from 'fs/promises'
-import { exec, execSync } from 'child_process'
+import { exec, execSync, spawn } from 'child_process'
 import { promisify } from 'util'
 import sharp from 'sharp'
 import * as p from '@clack/prompts'
@@ -23,6 +23,8 @@ const c = {
 
 const SPINNER = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
 
+let cancelled = false
+
 async function spin<T>(label: string, fn: () => Promise<T>): Promise<T> {
   let i = 0
   const id = setInterval(() => {
@@ -35,7 +37,71 @@ async function spin<T>(label: string, fn: () => Promise<T>): Promise<T> {
     return result
   } catch (err) {
     clearInterval(id)
+    if (cancelled) {
+      process.stdout.write('\r\x1b[K')
+      return new Promise<T>(() => {})
+    }
     process.stdout.write(`\r  ${c.red}✗${c.reset}  ${label}\n`)
+    throw err
+  }
+}
+
+async function spinFunny<T>(messages: string[], fn: () => Promise<T>): Promise<T> {
+  let spinI = 0
+  let msgI  = 0
+  let ticks = 0
+  const SWAP = Math.round(3_500 / 80) // rotate every ~3.5 s
+  process.stdout.write('\x1b[?25l') // hide cursor
+  const id = setInterval(() => {
+    if (ticks > 0 && ticks % SWAP === 0) msgI = (msgI + 1) % messages.length
+    ticks++
+    process.stdout.write(`\r\x1b[K  ${c.cyan}${SPINNER[spinI++ % SPINNER.length]}${c.reset}  ${messages[msgI]}`)
+  }, 80)
+  try {
+    const result = await fn()
+    clearInterval(id)
+    process.stdout.write(`\r\x1b[K  ${c.green}✓${c.reset}  ${messages[0]}\n\x1b[?25h`)
+    return result
+  } catch (err) {
+    clearInterval(id)
+    process.stdout.write(`\r\x1b[K  ${c.red}✗${c.reset}  ${messages[msgI]}\n\x1b[?25h`)
+    throw err
+  }
+}
+
+async function spinWithProgress<T>(
+  messages: string[],
+  total: number,
+  fn: (update: (done: number) => void) => Promise<T>
+): Promise<T> {
+  let spinI = 0
+  let msgI  = 0
+  let ticks = 0
+  let current = 0
+  const SWAP = Math.round(3_500 / 80)
+  process.stdout.write('\x1b[?25l')
+  const id = setInterval(() => {
+    if (ticks > 0 && ticks % SWAP === 0) msgI = (msgI + 1) % messages.length
+    ticks++
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0
+    process.stdout.write(`\r\x1b[K  ${c.cyan}${SPINNER[spinI++ % SPINNER.length]}${c.reset}  ${messages[msgI]}  ${c.dim}${current}/${total}  ${pct}%  · Ctrl+C to cancel${c.reset}`)
+  }, 80)
+  try {
+    const result = await fn((done) => { current = done })
+    clearInterval(id)
+    if (!cancelled) {
+      process.stdout.write(`\r\x1b[K  ${c.green}✓${c.reset}  ${messages[0]}  ${c.dim}${total}/${total}${c.reset}\n\x1b[?25h`)
+    } else {
+      process.stdout.write('\x1b[?25h')
+    }
+    return result
+  } catch (err) {
+    clearInterval(id)
+    if (cancelled) {
+      process.stdout.write('\x1b[?25h')
+      return new Promise<T>(() => {})
+    }
+    process.stdout.write(`\r\x1b[K  ${c.red}✗${c.reset}  ${messages[msgI]}  ${c.dim}${current}/${total}${c.reset}\n\x1b[?25h`)
     throw err
   }
 }
@@ -74,6 +140,7 @@ if (args.includes('--help')) {
     --prefix=<name>         Custom filename prefix
     --out=<dir>             Output directory                    (default: ~/Downloads)
     --urls=<path>           Text file with one URL per line
+    --swipe                 Emulate human swipe gestures in video mode
     --dark                  Force dark mode
     --no-scroll             Record without scrolling (video mode)
     --zip                   Bundle all outputs into a zip file
@@ -95,7 +162,16 @@ if (args.includes('--help')) {
 // ─── wizard ──────────────────────────────────────────────────────────────────
 
 if (args.length === 0) {
-  console.log(`\n  ${c.bold}frameup ✦${c.reset}\n`)
+  const LOGO = [
+    '█████ ████   ███  █   █ █████ █   █ ████ ',
+    '█     █   █ █   █ ██ ██ █     █   █ █   █',
+    '████  ████  █████ █ █ █ ████  █   █ ████ ',
+    '█     █  █  █   █ █   █ █     █   █ █    ',
+    '█     █   █ █   █ █   █ █████ █████ █    ',
+  ]
+  console.log()
+  for (const line of LOGO) console.log(`  ${c.bold}${line}${c.reset}`)
+  console.log(`\n  ${c.magenta}✦${c.reset}  ${c.dim}capture websites · desktop + mobile${c.reset}\n`)
   p.intro('  Let\'s set up your capture.')
 
   const urlInput = await p.text({
@@ -113,6 +189,21 @@ if (args.length === 0) {
     ],
   })
   if (p.isCancel(modeAnswer)) { p.cancel('Cancelled.'); process.exit(0) }
+
+  let scrollMs = 8000
+  if (modeAnswer === 'video') {
+    const scrollAnswer = await p.select({
+      message: 'Scroll speed',
+      options: [
+        { value: 6000,  label: 'Fast',   hint: '6 seconds' },
+        { value: 8000,  label: 'Normal', hint: '8 seconds (default)' },
+        { value: 12000, label: 'Slow',   hint: '12 seconds' },
+        { value: 18000, label: 'Cinematic', hint: '18 seconds' },
+      ],
+    })
+    if (p.isCancel(scrollAnswer)) { p.cancel('Cancelled.'); process.exit(0) }
+    scrollMs = scrollAnswer as number
+  }
 
   const extras = await p.multiselect({
     message: 'Any extras? (space to toggle, enter to confirm)',
@@ -140,6 +231,7 @@ if (args.length === 0) {
   const wizardArgs: string[] = [
     ...(urlInput as string).trim().split(/\s+/),
     modeAnswer as string,
+    ...(modeAnswer === 'video'      ? [`--scroll=${scrollMs}`] : []),
     ...(extras.includes('dark')     ? ['--dark']        : []),
     ...(extras.includes('webp')     ? ['--format=webp'] : []),
     ...(extras.includes('noscroll') ? ['--no-scroll']   : []),
@@ -195,9 +287,11 @@ const clipArg            = strFlag('clip')
 const FPS                = numFlag('fps', 0)
 const WAIT_MS            = numFlag('wait',   6_000)
 const SCROLL_DURATION_MS = numFlag('scroll', 8_000)
+const userSetScroll      = args.some(a => a.startsWith('--scroll='))
 const HOLD_MS            = numFlag('hold',   1_500)
 const darkMode           = args.includes('--dark')
 const noScroll           = args.includes('--no-scroll')
+const swipeScroll        = args.includes('--swipe')
 const doZip              = args.includes('--zip')
 const doOpen             = args.includes('--open')
 
@@ -209,6 +303,15 @@ const suffix = selector ? `_${selector.replace(/[^a-z0-9]/gi, '')}` : ''
 const clip = clipArg
   ? (() => { const [x, y, w, h] = clipArg.split(',').map(Number); return { left: x, top: y, width: w, height: h } })()
   : null
+
+async function pauseMedia(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('video, audio').forEach(el => {
+      (el as HTMLMediaElement).pause()
+      ;(el as HTMLMediaElement).muted = true
+    })
+  })
+}
 
 async function dismissCookies(page: import('playwright').Page) {
   await page.evaluate(() => {
@@ -260,7 +363,22 @@ const SIZES = [
 
 // ─── go ──────────────────────────────────────────────────────────────────────
 
+let activeBrowser: import('playwright').Browser | null = null
+let currentFrameDir: string | null = null
+
+process.on('SIGINT', async () => {
+  cancelled = true
+  process.stdout.write('\x1b[?25h\r\x1b[K')
+  console.log(`\n  ${c.magenta}✦${c.reset}  ${c.dim}Cancelled.${c.reset}\n`)
+  if (currentFrameDir) {
+    try { await rm(currentFrameDir, { recursive: true, force: true }) } catch {}
+  }
+  try { await activeBrowser?.close() } catch {}
+  process.exit(0)
+})
+
 const browser = await chromium.launch()
+activeBrowser = browser
 const saved: string[] = []
 
 for (const url of urls) {
@@ -293,6 +411,8 @@ for (const url of urls) {
       await spin('Letting animations breathe…', () =>
         page.waitForTimeout(WAIT_MS)
       )
+
+      await pauseMedia(page)
 
       const ext  = format === 'webp' ? 'webp' : 'png'
       const file = join(outDir, `${stem}_${ts}_${width}x${height}${suffix}.${ext}`)
@@ -328,13 +448,14 @@ for (const url of urls) {
       await page.close()
 
     } else {
-      const videoDir = join(tmpdir(), `frameup-${Date.now()}`)
-      await mkdir(videoDir, { recursive: true })
+      const frameDir = join(tmpdir(), `frameup-frames-${Date.now()}`)
+      await mkdir(frameDir, { recursive: true })
+      currentFrameDir = frameDir
 
       const context = await browser.newContext({
         viewport: { width, height },
+        deviceScaleFactor: 2,
         colorScheme: darkMode ? 'dark' : 'light',
-        recordVideo: { dir: videoDir, size: { width, height } },
       })
 
       const page = await context.newPage()
@@ -355,78 +476,130 @@ for (const url of urls) {
         page.waitForTimeout(WAIT_MS)
       )
 
-      const baseName = `${stem}_${ts}_${width}x${height}${suffix}`
+      const baseName  = `${stem}_${ts}_${width}x${height}${suffix}`
+      const targetFps = FPS > 0 ? FPS : 30
 
-      await spin(`Rolling ${label} (${width}×${height})…`, async () => {
-        if (!noScroll) {
-          await page.evaluate(async ({ durationMs, sel }) => {
-            let startY = 0
-            let endY   = document.body.scrollHeight - window.innerHeight
+      const bounds = await page.evaluate((sel: string | null) => {
+        const scrollable = document.body.scrollHeight - window.innerHeight
+        if (!sel) return { startY: 0, endY: scrollable }
+        const el = document.querySelector(sel)
+        if (!el) return { startY: 0, endY: scrollable }
+        const rect = el.getBoundingClientRect()
+        const startY = window.scrollY + rect.top
+        const endY   = Math.max(startY, window.scrollY + rect.bottom - window.innerHeight)
+        return { startY, endY }
+      }, selector ?? null)
 
-            if (sel) {
-              const el = document.querySelector(sel)
-              if (el) {
-                const rect = el.getBoundingClientRect()
-                startY = window.scrollY + rect.top
-                endY   = Math.max(startY, window.scrollY + rect.bottom - window.innerHeight)
-                window.scrollTo(0, startY)
-              }
+      // Auto-calculate scroll duration from page height unless user set --scroll
+      const scrollable      = bounds.endY - bounds.startY
+      const autoDurationMs  = Math.min(Math.max(Math.round(scrollable / 0.6), 4_000), 30_000)
+      const scrollDurationMs = userSetScroll ? SCROLL_DURATION_MS : autoDurationMs
+      const durationLabel   = userSetScroll
+        ? `${scrollDurationMs / 1000}s`
+        : `auto ${(scrollDurationMs / 1000).toFixed(1)}s · ${Math.round(scrollable)}px`
+
+      // Pre-calculate swipe weights in Node.js for full determinism
+      const swipeCount = Math.max(1, Math.round(scrollable / height))
+      const rawW       = Array.from({ length: swipeCount }, () => 0.6 + Math.random() * 0.8)
+      const sumW       = rawW.reduce((a, b) => a + b, 0)
+      const distW      = rawW.map(w => w / sumW)
+      const distBounds = [0]
+      distW.forEach(w => distBounds.push(distBounds[distBounds.length - 1] + w))
+
+      const scrollFrames = Math.ceil(scrollDurationMs / 1000 * targetFps)
+      const holdFrames   = Math.ceil(HOLD_MS / 1000 * targetFps)
+      const totalFrames  = noScroll ? holdFrames : scrollFrames + holdFrames
+
+      const info = ` (${durationLabel})`
+      await spinWithProgress([
+        `Capturing ${totalFrames} frames${info}…`,
+        `Asking Chrome to sit still${info}…`,
+        `Tickling the renderer${info}…`,
+        `Bribing the compositor${info}…`,
+        `Calculating vibes per second${info}…`,
+        `Doing the scroll of a lifetime${info}…`,
+        `Telling the hero section to stop fidgeting${info}…`,
+        `Scrolling slower than design revisions${info}…`,
+        `Making pixels march in order${info}…`,
+        `Instructing the browser to act natural${info}…`,
+        `Pretending not to be a robot${info}…`,
+        `Waiting for the above-the-fold to finish its thing${info}…`,
+        `Capturing the essence of this website${info}…`,
+      ], totalFrames, async (update) => {
+        for (let i = 0; i < totalFrames; i++) {
+          if (cancelled) return
+          let scrollY = bounds.endY
+          if (!noScroll && i < scrollFrames) {
+            const t = scrollFrames > 1 ? i / (scrollFrames - 1) : 1
+            let eased: number
+            if (swipeScroll) {
+              const seg  = Math.min(Math.floor(t * swipeCount), swipeCount - 1)
+              const tSeg = (t * swipeCount) % 1
+              eased = distBounds[seg] + distW[seg] * 0.5 * (1 - Math.cos(Math.PI * tSeg))
+            } else {
+              const m    = 0.15
+              const vMax = 1 / (1 - m)
+              eased = t <= m
+                ? (vMax * t * t) / (2 * m)
+                : t >= 1 - m
+                  ? 1 - (vMax * (1 - t) * (1 - t)) / (2 * m)
+                  : (vMax * m) / 2 + vMax * (t - m)
             }
-
-            if (endY <= startY) return
-            const start = performance.now()
-            await new Promise<void>(resolve => {
-              function step() {
-                const t = Math.min((performance.now() - start) / durationMs, 1)
-                const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-                window.scrollTo(0, startY + (endY - startY) * eased)
-                t < 1 ? requestAnimationFrame(step) : resolve()
-              }
-              requestAnimationFrame(step)
-            })
-          }, { durationMs: SCROLL_DURATION_MS, sel: selector ?? null })
+            scrollY = bounds.startY + scrollable * eased
+          }
+          try {
+            await page.evaluate((y: number) => window.scrollTo(0, y), scrollY)
+            const framePath = join(frameDir, `frame_${String(i).padStart(5, '0')}.jpg`)
+            await page.screenshot({ path: framePath, type: 'jpeg', quality: 95 })
+          } catch (err) {
+            if (cancelled) return
+            throw err
+          }
+          update(i + 1)
         }
-
-        await page.waitForTimeout(HOLD_MS)
-        await page.close()
-        await context.close()
       })
 
-      const files = await readdir(videoDir)
-      const webm  = files.find(f => f.endsWith('.webm'))
-      if (!webm) {
-        console.error(`\n  ${c.red}✗${c.reset}  No video found for ${width}×${height}\n`)
+      await page.close()
+      await context.close()
+
+      if (!hasFfmpeg) {
+        console.error(`\n  ${c.red}✗${c.reset}  ffmpeg is required for video mode\n`)
         continue
       }
 
-      const webmSrc = join(videoDir, webm)
+      const mp4Out = join(outDir, `${baseName}.mp4`)
 
-      if (hasFfmpeg) {
-        const mp4Out = join(outDir, `${baseName}.mp4`)
-        await spin('Developing the footage…', async () => {
-          const fpsFlag = FPS > 0 ? `-r ${FPS} ` : ''
-          // Scale 2x with Lanczos + unsharp for perceived sharpness
-          const sharpenFilter = 'scale=iw*2:ih*2:flags=lanczos,unsharp=5:5:1.0:5:5:0.0'
-          const filterGraph = watermarkPath
-            ? `[0:v]${sharpenFilter}[sharp];[sharp][1:v]overlay=W-w-20:H-h-20`
-            : sharpenFilter
-          const filterFlag = watermarkPath
-            ? `-filter_complex "${filterGraph}"`
-            : `-vf "${filterGraph}"`
-          const wmInput = watermarkPath ? `-i "${watermarkPath}" ` : ''
-          await execAsync(
-            `ffmpeg -y -i "${webmSrc}" ${wmInput}${filterFlag} ${fpsFlag}-c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -movflags +faststart "${mp4Out}"`
-          )
-          await rm(videoDir, { recursive: true, force: true })
+      await spinWithProgress([
+        'Encoding video…',
+        'Compressing hopes and dreams…',
+        'Running libx264 through its paces…',
+        'Transcoding the vibes…',
+        'Making it presentation-ready…',
+        'Telling ffmpeg to do its best…',
+      ], totalFrames, async (update) => {
+        const scale      = 'scale=trunc(iw/2)*2:trunc(ih/2)*2'
+        const filterFlag = watermarkPath
+          ? `-filter_complex "[0:v]${scale}[s];[s][1:v]overlay=W-w-20:H-h-20"`
+          : `-vf "${scale}"`
+        const wmInput = watermarkPath ? `-i "${watermarkPath}"` : ''
+        const ffCmd   = `ffmpeg -y -r ${targetFps} -i "${frameDir}/frame_%05d.jpg" ${wmInput} ${filterFlag} -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -movflags +faststart "${mp4Out}"`
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn('sh', ['-c', ffCmd])
+          proc.stderr.on('data', (chunk: Buffer) => {
+            const m = chunk.toString().match(/frame=\s*(\d+)/)
+            if (m) update(Math.min(parseInt(m[1], 10), totalFrames))
+          })
+          proc.on('close', (code) => {
+            if (code === 0) resolve()
+            else reject(new Error(`ffmpeg exited with code ${code}`))
+          })
         })
-        log(mp4Out)
-        saved.push(mp4Out)
-      } else {
-        const webmOut = join(outDir, `${baseName}.webm`)
-        await rename(webmSrc, webmOut)
-        log(webmOut)
-        saved.push(webmOut)
-      }
+        await rm(frameDir, { recursive: true, force: true })
+        currentFrameDir = null
+      })
+
+      log(mp4Out)
+      saved.push(mp4Out)
     }
 
     console.log()

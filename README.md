@@ -2,7 +2,7 @@
 
 <img src="logo-dark.gif" width="400" />
 
-**frameup** is a tool built for designers and developers to easily capture high-quality visuals of their work. It opens any website in a real browser and saves it as high-resolution screenshots or a smooth scroll-through video — desktop and mobile sizes at once, straight to your Downloads folder.
+**frameup** is a tool built for designers and developers to easily capture high-quality visuals of their work. It opens any website in a real browser and saves it as high-resolution screenshots or a buttery smooth scroll-through video — desktop and mobile sizes at once, straight to your Downloads folder.
 
 https://github.com/zjebinsky/frameup
 
@@ -10,9 +10,9 @@ https://github.com/zjebinsky/frameup
 
 ## What you get
 
-**Screenshots** — two high-res PNGs, one desktop and one mobile, captured after the page has fully loaded and animations have finished.
+**Screenshots** — two high-res PNGs, one desktop and one mobile, captured after the page has fully loaded and animations have finished. Cookie banners are dismissed automatically.
 
-**Videos** — two MP4s showing the full page scrolling from top to bottom, one desktop and one mobile.
+**Videos** — two MP4s showing the full page scrolling from top to bottom, one desktop and one mobile. Scroll speed is calculated automatically based on page height. Videos and animations on the page play naturally during capture. Press `Ctrl+C` at any time to cancel — frameup cleans up and exits immediately.
 
 ---
 
@@ -141,10 +141,6 @@ bun run frameup.ts https://site1.com https://site2.com https://site3.com images
 
 ---
 
-Your files will appear in **~/Downloads** within about 30 seconds.
-
----
-
 ## Options
 
 You can customise the output by adding flags to the command:
@@ -152,16 +148,17 @@ You can customise the output by adding flags to the command:
 ```bash
 bun run frameup.ts https://yourwebsite.com images --wait=3000 --density=2
 bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
+bun run frameup.ts https://yourwebsite.com video --swipe
 ```
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--wait=<ms>` | `6000` | Time to wait before capturing — increase if animations are still running |
-| `--scroll=<ms>` | `8000` | How long the scroll takes in video mode — increase for a slower, more cinematic feel |
+| `--scroll=<ms>` | auto | Scroll duration in video mode — calculated from page height by default, override with e.g. `--scroll=12000` |
 | `--hold=<ms>` | `1500` | How long to pause at the bottom before the video ends |
 | `--density=<n>` | `3` | Pixel density for images — `1`, `2`, or `3` |
 | `--format=<fmt>` | `png` | Output format for images — `png` or `webp` |
-| `--fps=<n>` | — | Video frame rate, e.g. `--fps=60` |
+| `--fps=<n>` | `30` | Video frame rate |
 | `--selector=<css>` | — | Capture a specific section only, e.g. `--selector=".hero"` |
 | `--delay-selector=<css>` | — | Wait for an element to appear before capturing, e.g. `--delay-selector=".loaded"` |
 | `--clip=<x,y,w,h>` | — | Crop the output to a region in pixels, e.g. `--clip=0,0,1500,800` |
@@ -169,6 +166,7 @@ bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
 | `--prefix=<name>` | hostname | Custom filename prefix instead of the site hostname |
 | `--out=<dir>` | `~/Downloads` | Custom output directory |
 | `--urls=<path>` | — | Text file with one URL per line — processed in order |
+| `--swipe` | — | Emulate human swipe gestures in video mode — scroll pulses based on page height |
 | `--dark` | — | Force dark mode before capturing |
 | `--no-scroll` | — | Record without scrolling in video mode |
 | `--zip` | — | Bundle all output files into a single zip |
@@ -177,6 +175,22 @@ bun run frameup.ts https://yourwebsite.com video --scroll=12000 --hold=3000
 1000 = 1 second.
 
 Run `bun run frameup.ts --help` to see all options in the terminal.
+
+### Progress
+
+In video mode, frameup shows live frame progress while capturing and encoding — `42/360  12%` — so you always know how far along it is. Press `Ctrl+C` at any point to cancel cleanly.
+
+### Scroll speed
+
+In video mode, frameup automatically calculates how long the scroll should take based on the page height — roughly 600px per second, clamped between 4 and 30 seconds. Override it any time with `--scroll=<ms>`.
+
+### Swipe mode
+
+`--swipe` makes the scroll feel like a real finger swiping through the page. The number of swipe impulses is calculated from the page height (one swipe per viewport height of content), and each swipe covers a randomly varied slice of the page for a natural, organic feel.
+
+```bash
+bun run frameup.ts https://yourwebsite.com video --swipe
+```
 
 ### Capturing a specific section
 
@@ -209,4 +223,3 @@ Not sure what selector to use? Right-click the element in your browser → Inspe
 Files are named automatically: `sitename_date_size.png` / `.mp4`
 
 ---
-
