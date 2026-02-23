@@ -1,6 +1,6 @@
 # frameup
 
-<img src="logo.png" width="120" />
+<img src="logo.png" width="200" />
 
 **frameup** is a command-line tool that opens any website in a real browser and saves it as high-resolution screenshots or a smooth scroll-through video — desktop and mobile sizes at once, straight to your Downloads folder.
 
