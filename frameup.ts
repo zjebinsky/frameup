@@ -405,7 +405,7 @@ for (const url of urls) {
         await spin('Developing the footage…', () => {
           const wmFlag  = watermarkPath ? `-i "${watermarkPath}" -filter_complex "overlay=W-w-20:H-h-20" ` : ''
           const fpsFlag = FPS > 0 ? `-r ${FPS} ` : ''
-          const scaleFilter = 'scale=trunc(iw/2)*2:trunc(ih/2)*2'
+          const scaleFilter = 'scale=iw*2:ih*2:flags=lanczos'
           const filterGraph = watermarkPath
             ? `[0:v]${scaleFilter}[scaled];[scaled][1:v]overlay=W-w-20:H-h-20`
             : scaleFilter
