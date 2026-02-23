@@ -334,7 +334,7 @@ for (const url of urls) {
       const context = await browser.newContext({
         viewport: { width, height },
         colorScheme: darkMode ? 'dark' : 'light',
-        recordVideo: { dir: videoDir, size: { width: width * 2, height: height * 2 } },
+        recordVideo: { dir: videoDir, size: { width, height } },
       })
 
       const page = await context.newPage()
