@@ -1,0 +1,16 @@
+{
+  "name": "capture",
+  "version": "1.0.0",
+  "description": "Capture websites as screenshots or scroll-through videos via Playwright",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "capture": "bun run capture.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
